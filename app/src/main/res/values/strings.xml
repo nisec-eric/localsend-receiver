@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">LocalSend Receiver</string>
+    <string name="status_waiting">Waiting for connections...</string>
+    <string name="status_connected">Connected: %s</string>
+    <string name="status_receiving">Receiving: %s</string>
+    <string name="status_saved">Saved: %s</string>
+    <string name="status_error">Error: %s</string>
+    <string name="btn_accept">Accept</string>
+    <string name="btn_reject">Reject</string>
+    <string name="incoming_file">Incoming File</string>
+    <string name="incoming_files">Incoming Files (%d)</string>
+    <string name="from_device">From: %s</string>
+    <string name="no_wifi">No WiFi connection</string>
+    <string name="device_ip">IP: %s</string>
+    <string name="service_running">LocalSend service running</string>
+    <string name="service_stopped">Service stopped</string>
+    <string name="title_activity_main">LocalSend Receiver</string>
+</resources>
