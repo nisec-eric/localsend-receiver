@@ -37,6 +37,7 @@ class FileReceiver(private val listener: ServerEventListener) {
 
         val destFile = resolveUniqueFile(destDir, transfer.fileName)
         val fileKey = "$sessionId:$fileId"
+        val expectedSize = if (contentLength > 0) contentLength else transfer.size
 
         try {
             val buffer = ByteArray(BUFFER_SIZE)
@@ -44,13 +45,18 @@ class FileReceiver(private val listener: ServerEventListener) {
             var lastProgressReport: Long = 0
 
             FileOutputStream(destFile).use { output ->
-                while (true) {
+                while (totalRead < expectedSize) {
                     if (isCancelled(fileKey)) {
                         destFile.delete()
                         throw TransferCancelledException(fileId)
                     }
 
-                    val read = inputStream.read(buffer)
+                    val toRead = if (expectedSize - totalRead < buffer.size) {
+                        (expectedSize - totalRead).toInt()
+                    } else {
+                        buffer.size
+                    }
+                    val read = inputStream.read(buffer, 0, toRead)
                     if (read == -1) break
 
                     output.write(buffer, 0, read)
@@ -59,8 +65,7 @@ class FileReceiver(private val listener: ServerEventListener) {
                     val now = System.currentTimeMillis()
                     if (now - lastProgressReport >= PROGRESS_INTERVAL_MS) {
                         lastProgressReport = now
-                        val expected = if (contentLength > 0) contentLength else transfer.size
-                        listener.onFileReceiveProgress(sessionId, fileId, totalRead, expected)
+                        listener.onFileReceiveProgress(sessionId, fileId, totalRead, expectedSize)
                     }
                 }
                 output.flush()

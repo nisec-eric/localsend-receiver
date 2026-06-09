@@ -77,13 +77,17 @@ class MainActivity : Activity() {
     override fun onStart() {
         super.onStart()
         val filter = IntentFilter(LocalSendService.ACTION_STATUS_UPDATE)
-        registerReceiver(statusReceiver, filter)
+        try {
+            registerReceiver(statusReceiver, filter)
+        } catch (_: Exception) {}
         startLocalSendService()
+        LocalSendService.registerActivity(this)
     }
 
     override fun onStop() {
-        super.onStop()
+        LocalSendService.unregisterActivity()
         try { unregisterReceiver(statusReceiver) } catch (_: Exception) {}
+        super.onStop()
     }
 
     @Suppress("DEPRECATION")
@@ -110,14 +114,25 @@ class MainActivity : Activity() {
     }
 
     private fun ensureDownloadDirectory() {
-        val dir = File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS), "LocalSend")
-        if (!dir.exists()) dir.mkdirs()
+        try {
+            val dir = File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS), "LocalSend")
+            if (!dir.exists()) dir.mkdirs()
+            if (!dir.canWrite()) {
+                addLogEntry("Warning", "Cannot write to download directory")
+            }
+        } catch (e: Exception) {
+            addLogEntry("Error", "Cannot create download directory: ${e.message}")
+        }
     }
 
     private fun startLocalSendService() {
         val intent = Intent(this, LocalSendService::class.java)
         intent.action = LocalSendService.ACTION_START
-        startService(intent)
+        if (Build.VERSION.SDK_INT >= 26) {
+            startForegroundService(intent)
+        } else {
+            startService(intent)
+        }
         statusText.text = getString(R.string.status_waiting)
     }
 
@@ -138,10 +153,17 @@ class MainActivity : Activity() {
     }
 
     fun showAcceptDialog(senderAlias: String, files: Map<String, FileDto>): Boolean {
+        if (isFinishing) return false
+
         val accepted = AtomicBoolean(false)
         val latch = CountDownLatch(1)
 
         runOnUiThread {
+            if (isFinishing) {
+                latch.countDown()
+                return@runOnUiThread
+            }
+
             val fileCount = files.size
             val totalSize = files.values.sumOf { it.size }
             val fileNames = files.values.take(3).joinToString(", ") { it.fileName }
@@ -168,13 +190,20 @@ class MainActivity : Activity() {
                 .setNegativeButton(R.string.btn_reject) { _, _ ->
                     accepted.set(false); latch.countDown()
                 }
+                .setOnCancelListener {
+                    accepted.set(false); latch.countDown()
+                }
                 .setCancelable(false)
                 .create()
 
             dialog.show()
         }
 
-        latch.await()
+        try {
+            latch.await(60, java.util.concurrent.TimeUnit.SECONDS)
+        } catch (_: InterruptedException) {
+            Thread.currentThread().interrupt()
+        }
         return accepted.get()
     }
 
@@ -206,9 +235,19 @@ class MainActivity : Activity() {
             @Suppress("DEPRECATION")
             tv.setOnClickListener {
                 try {
+                    val file = File(savedPath)
+                    val uri = if (Build.VERSION.SDK_INT >= 24) {
+                        androidx.core.content.FileProvider.getUriForFile(
+                            this@MainActivity,
+                            "${packageName}.fileprovider",
+                            file
+                        )
+                    } else {
+                        android.net.Uri.fromFile(file)
+                    }
                     val intent = Intent(Intent.ACTION_VIEW)
-                    intent.setDataAndType(android.net.Uri.fromFile(File(savedPath)), "*/*")
-                    intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    intent.setDataAndType(uri, "*/*")
+                    intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
                     startActivity(intent)
                 } catch (e: Exception) {
                     addLogEntry("Cannot open file", e.message)

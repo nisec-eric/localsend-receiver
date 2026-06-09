@@ -17,7 +17,8 @@ object NetworkUtils {
     @JvmStatic
     fun getWifiIpAddress(context: Context): String? {
         val wifiManager = getWifiManager(context) ?: return null
-        val ipInt = wifiManager.connectionInfo.ipAddress
+        val info = wifiManager.connectionInfo ?: return null
+        val ipInt = info.ipAddress
         if (ipInt == 0) return null
         return intToIpAddress(ipInt)
     }

@@ -1,7 +1,12 @@
 # LocalSend Receiver for Android 4.2.2
 
 适用于车载 Android 4.2.2 (API 17) 横屏设备的 LocalSend v2 协议接收端。
-仅支持 HTTP 明文模式，仅接收文件，可被其他 LocalSend 设备发现。
+
+- 仅 HTTP 明文模式，仅接收文件
+- 可被其他 LocalSend 设备发现（UDP Multicast + HTTP Register）
+- 传输前弹窗确认，文件保存到 `/sdcard/Download/LocalSend/`
+- 支持中文文件名
+- Release APK 约 760 KB
 
 ## 项目结构
 
@@ -15,21 +20,20 @@ localsend-receiver/
 │   │   ├── service/
 │   │   │   └── LocalSendService.kt             # Foreground Service，编排 HTTP + Multicast
 │   │   ├── network/
-│   │   │   ├── LocalSendHttpServer.kt          # NanoHTTPD HTTP 服务端，实现 v2 协议 5 个端点
-│   │   │   ├── MulticastDiscoveryService.kt    # UDP Multicast 发现监听 (224.0.0.167:53317)
-│   │   │   ├── HttpDiscoveryResponder.kt       # HTTP 注册响应（发现后的回调注册）
-│   │   │   ├── FileReceiver.kt                # 文件流式保存 + 进度回调 + 取消支持
-│   │   │   ├── SessionManager.kt              # 传输会话管理 (sessionId → files → tokens)
+│   │   │   ├── LocalSendHttpServer.kt          # NanoHTTPD，实现 v2 协议 5 个端点
+│   │   │   ├── MulticastDiscoveryService.kt    # UDP Multicast 发现 (224.0.0.167:53317)
+│   │   │   ├── HttpDiscoveryResponder.kt       # HTTP 注册回调（发现后向发送方注册自己）
+│   │   │   ├── FileReceiver.kt                # 流式保存 + 进度回调 + 取消支持
+│   │   │   ├── SessionManager.kt              # 传输会话 (sessionId → files → tokens)
 │   │   │   ├── ServerEventListener.kt         # 服务端事件回调接口
 │   │   │   ├── DiscoveryListener.kt           # 发现事件回调接口
-│   │   │   └── dto/ProtocolDto.kt             # LocalSend v2 协议 DTO (Gson 序列化)
-│   │   ├── receiver/
-│   │   │   └── WifiStateReceiver.kt           # WiFi 连接变化时自动重启服务
+│   │   │   └── dto/ProtocolDto.kt             # LocalSend v2 协议 DTO
 │   │   └── util/
-│   │       ├── DeviceConfig.kt                # 设备别名/fingerprint/端口配置 (SharedPreferences 持久化)
-│   │       └── NetworkUtils.kt                # WiFi IP 获取 / MulticastLock / WifiLock
+│   │       ├── DeviceConfig.kt                # 设备别名/fingerprint/端口 (SharedPreferences)
+│   │       └── NetworkUtils.kt                # WiFi IP / MulticastLock / WifiLock
 │   └── res/
-│       ├── layout/activity_main.xml           # 横屏双栏布局 (左:状态+日志 右:接收历史)
+│       ├── layout/activity_main.xml           # 横屏双栏布局
+│       ├── xml/file_paths.xml                 # FileProvider 路径配置
 │       └── values/ (strings / colors / styles)
 ├── build.gradle.kts
 └── settings.gradle.kts
@@ -47,7 +51,7 @@ localsend-receiver/
                                    │  │  │ 状态/日志 │ │ 接收文件历史  │  │ │
                                    │  │  └──────────┘ └──────────────┘  │ │
                                    │  └────────────┬────────────────────┘ │
-                                   │               │ WeakReference       │
+                                   │               │ Static + WeakRef     │
                                    │  ┌────────────▼────────────────────┐ │
                                    │  │     LocalSendService (前台)      │ │
                                    │  │                                  │ │
@@ -90,6 +94,7 @@ localsend-receiver/
 ### 1. 设备发现
 
 **方式A — UDP Multicast（主要）**
+
 ```
 手机                              车机
   │  UDP → 224.0.0.167:53317       │
@@ -105,9 +110,8 @@ localsend-receiver/
 ```
 
 **方式B — HTTP 子网扫描（Fallback）**
-```
-手机遍历子网每个IP，POST /v2/register → 车机回复设备信息
-```
+
+手机遍历子网每个 IP，`POST /v2/register` → 车机回复设备信息。
 
 ### 2. 文件传输
 
@@ -117,17 +121,18 @@ localsend-receiver/
   │  POST /v2/prepare-upload        │
   │  {info:{...}, files:{...}}      │
   │────────────────────────────────>│
-  │                                 │ ← 弹窗确认 (CountDownLatch 阻塞)
+  │                                 │ ← 弹窗确认 (CountDownLatch 阻塞 HTTP 线程, 60s 超时)
   │  200 OK                         │
   │  {sessionId, files:{id:token}}  │
   │<────────────────────────────────│
   │                                 │
   │  POST /v2/upload                │
   │  ?sessionId=X&fileId=Y&token=Z  │
+  │  Content-Length: <file_size>     │
   │  (binary body)                  │
   │────────────────────────────────>│
-  │                                 │ ← 流式保存到 Download/LocalSend/
-  │  200 OK                         │
+  │                                 │ ← 精确读取 Content-Length 字节，流式保存
+  │  200 OK {}                      │
   │<────────────────────────────────│
 ```
 
@@ -140,18 +145,61 @@ localsend-receiver/
   │                                 │ ← 清理会话，删除临时文件
 ```
 
+### 4. 设备信息查询
+
+```
+手机                              车机
+  │  GET /v2/info                   │
+  │────────────────────────────────>│
+  │                                 │
+  │  200 OK                         │
+  │  {alias, version, fingerprint,  │
+  │   deviceType:"HEADLESS", ...}   │
+  │<────────────────────────────────│
+```
+
+## Activity-Service 连接
+
+```
+MainActivity.onStart()
+  ├─ registerReceiver(statusReceiver)
+  ├─ startForegroundService(ACTION_START)   ← API 26+: startForegroundService
+  └─ LocalSendService.registerActivity(this)
+       └─ Service.attachActivity(activity)  ← WeakReference 防泄漏
+
+LocalSendService.onCreate()
+  ├─ instance = this                        ← 静态引用
+  └─ pendingActivity?.get()?.let { attachActivity(it) }  ← 处理竞态
+
+MainActivity.onStop()
+  ├─ LocalSendService.unregisterActivity()
+  └─ unregisterReceiver(statusReceiver)
+
+MainActivity.onBackPressed()
+  ├─ startService(ACTION_STOP)
+  ├─ stopSelf()                             ← 防止僵尸服务
+  └─ finish()
+```
+
+`registerActivity` / `unregisterActivity` 使用静态变量 `pendingActivity` 桥接，
+解决 `startForegroundService()` 异步创建 Service 时 Activity 引用丢失的竞态问题。
+
 ## 关键技术决策
 
 | 决策 | 原因 |
 |---|---|
-| **原生 Kotlin + Activity** (非 Flutter) | Flutter 最低 API 21，无法运行在 Android 4.2.2 |
-| **NanoHTTPD** (非 OkHttp Server) | 轻量嵌入式 HTTP 服务器，支持 API 9+，仅 100KB |
-| **HTTP 明文模式** (非 HTTPS) | Android 4.2.2 原生不支持 TLS 1.2；HTTP 模式下 fingerprint 用随机字符串 |
-| **仅实现 v2 协议** | v3 有 nonce 交换仍不稳定；v2 是当前版本向后兼容的端点 |
-| **WeakReference 持有 Activity** | 防 Service 泄漏 Activity 导致内存无法回收 |
-| **START_NOT_STICKY** | 车机内存小，Service 被杀后不自动重启 |
-| **JsonObject 手动解析 Multicast** | ProGuard/R8 会剥离 Gson TypeToken 泛型签名 |
-| **日志/历史列表上限** | log 50 条 / history 100 条，防止 LinearLayout 子 View 无限增长 OOM |
+| 原生 Kotlin + Activity (非 Flutter) | Flutter 最低 API 21，无法运行在 Android 4.2.2 |
+| NanoHTTPD 2.3.1 | 轻量嵌入式 HTTP 服务器，支持 API 9+，仅 100KB |
+| HTTP 明文模式 (非 HTTPS) | Android 4.2.2 原生不支持 TLS 1.2；fingerprint 用随机字符串 |
+| 仅 v2 协议 | v3 有 nonce 交换仍不稳定；v2 端点向后兼容 |
+| 直接读 InputStream (非 parseBody) | NanoHTTPD parseBody 对中文 JSON 编码错误，直接读字节用 UTF-8 解码 |
+| WeakReference 持有 Activity | 防 Service 泄漏 Activity |
+| Static pendingActivity 桥接 | 解决 Activity 与 Service 启动时序竞态 |
+| START_NOT_STICKY | 车机内存小，Service 被杀后不自动重启 |
+| Theme.DeviceDefault | AppCompat 主题需要 AppCompatActivity，普通 Activity 不兼容 |
+| 日志/历史列表上限 | log 50 条 / history 100 条，防 OOM |
+| 精确读 Content-Length 字节 | HTTP keep-alive 下 read()==-1 会阻塞超时 |
+| 不关闭 session.inputStream | .use{} 会关闭底层 socket 导致响应发不出去 |
 
 ## 构建
 
@@ -164,7 +212,7 @@ localsend-receiver/
 
 # APK 输出路径
 # app/build/outputs/apk/debug/app-debug.apk     (~2.5 MB)
-# app/build/outputs/apk/release/app-release.apk  (~772 KB)
+# app/build/outputs/apk/release/app-release.apk  (~760 KB)
 ```
 
 ### 签名密钥
@@ -180,7 +228,7 @@ localsend-receiver/
 3. 打开 app → 自动启动 HTTP 服务 + Multicast 监听
 4. 手机 LocalSend 发送文件 → 自动发现车机 (显示 "Car-{型号}")
 5. 车机弹窗确认 → 文件保存到 `/sdcard/Download/LocalSend/`
-6. 按返回键退出 → 停止服务，释放端口
+6. 按返回键退出 → 停止服务并 stopSelf，释放端口
 
 ## 环境要求
 
@@ -200,8 +248,8 @@ localsend-receiver/
 |---|---|---|
 | NanoHTTPD | 2.3.1 | 嵌入式 HTTP 服务器 |
 | Gson | 2.10.1 | JSON 序列化 |
-| AndroidX AppCompat | 1.4.2 | 兼容旧版主题 |
-| AndroidX Core | 1.5.0 | 兼容旧版 API |
+| AndroidX Core | 1.5.0 | FileProvider (API 24+ 文件打开) |
+| AndroidX AppCompat | 1.4.2 | 编译时资源兼容 |
 
 ## 已知限制
 
@@ -210,3 +258,69 @@ localsend-receiver/
 - 不支持 WebRTC 中继（仅局域网直连）
 - NanoHTTPD 每请求一个线程（车机场景并发极低，可接受）
 - `WifiInfo.getConnectionInfo()` 在高版本 API 已废弃，但 API 17 可用
+
+## 踩坑记录
+
+### NanoHTTPD parseBody 中文乱码
+
+NanoHTTPD 的 `parseBody()` 对 `application/json` body 使用 `new String(bytes)` 转换，
+平台默认编码可能是 ISO-8859-1，导致中文变乱码。
+
+修复：绕过 `parseBody()`，直接从 `session.inputStream` 读取 `Content-Length` 字节的原始数据，
+用 `String(bytes, Charsets.UTF_8)` 解码。
+
+### session.inputStream.use{} 导致 IncompleteMessage
+
+`use{}` 会在读取完毕后关闭 stream，但 NanoHTTPD 的 session stream 就是 socket stream。
+关闭它会导致后续 HTTP 响应无法发送，发送方收到 `IncompleteMessage` 错误。
+
+修复：去掉 `.use{}`，不关闭 stream，让 NanoHTTPD 自行管理连接生命周期。
+
+### HTTP keep-alive 下 read() 阻塞超时
+
+`FileReceiver.saveFile()` 原来用 `while (read() != -1)` 读取文件，但 HTTP keep-alive 下
+socket 不会在 body 结束后关闭，`read()` 会一直阻塞直到超时。
+
+修复：精确读取 `Content-Length` 字节，读完后立即返回响应。
+
+### Activity-Service 竞态导致 transfer rejected
+
+`startForegroundService()` 是异步的。Activity 在 `onStart()` 中调用 `attachActivity()`
+时 Service 可能还没创建，`activityRef` 为 null，所有传输被 auto-reject。
+
+修复：使用 `companion object` 的静态 `pendingActivity` 变量，Activity 先存引用，
+Service `onCreate()` 时再取出。
+
+### Theme.AppCompat + Activity 崩溃
+
+`Theme.AppCompat.NoActionBar` 需要 `AppCompatActivity` 才能正确初始化，
+用在普通 `Activity` 上会在某些 OEM 设备崩溃。
+
+修复：改用 `android:Theme.DeviceDefault.NoActionBar`。
+
+### API 31+ PendingIntent FLAG_IMMUTABLE
+
+Android 12 (API 31) 要求 PendingIntent 必须指定 `FLAG_IMMUTABLE` 或 `FLAG_MUTABLE`。
+
+修复：`if (Build.VERSION.SDK_INT >= 31) FLAG_IMMUTABLE else 0`。
+
+### 缺失权限导致各版本崩溃
+
+| 权限 | 缺失时崩溃 |
+|---|---|
+| FOREGROUND_SERVICE | API 28+ startForeground() 抛 SecurityException |
+| WAKE_LOCK | WifiLock.acquire() 抛 SecurityException |
+| usesCleartextTraffic | API 28+ HTTP 连接被系统阻止 |
+
+### stopAll() 缺少 stopSelf()
+
+按返回键调用 `stopAll()` 停止了服务器和前台通知，但没有调用 `stopSelf()`，
+服务变成无通知的僵尸后台服务，最终被系统杀死，下次开机显示"该软件停止运行"。
+
+修复：`stopAll()` 后调用 `stopSelf()`，`onDestroy()` 中也调用 `stopAll()`。
+
+### Uri.fromFile 在 API 24+ 崩溃
+
+`Uri.fromFile()` 在 API 24+ 抛 `FileUriExposedException`。
+
+修复：API 24+ 使用 `FileProvider.getUriForFile()`。

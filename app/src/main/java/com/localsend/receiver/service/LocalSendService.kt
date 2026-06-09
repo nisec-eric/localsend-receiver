@@ -26,13 +26,32 @@ class LocalSendService : Service() {
         const val ACTION_START = "com.localsend.receiver.START"
         const val ACTION_STOP = "com.localsend.receiver.STOP"
         const val ACTION_STATUS_UPDATE = "com.localsend.receiver.STATUS_UPDATE"
-        const val NOTIFICATION_CHANNEL_ID = "localsend_service"
-        const val NOTIFICATION_ID = 1
+        private const val NOTIFICATION_CHANNEL_ID = "localsend_service"
+        private const val NOTIFICATION_ID = 1
+
+        @Volatile
+        private var instance: LocalSendService? = null
+
+        private var pendingActivity: WeakReference<MainActivity>? = null
+
+        @JvmStatic
+        fun registerActivity(activity: MainActivity) {
+            pendingActivity = WeakReference(activity)
+            instance?.attachActivity(activity)
+        }
+
+        @JvmStatic
+        fun unregisterActivity() {
+            pendingActivity?.clear()
+            pendingActivity = null
+            instance?.detachActivity()
+        }
     }
 
     private var httpServer: LocalSendHttpServer? = null
     private var multicastService: MulticastDiscoveryService? = null
     private var activityRef: WeakReference<MainActivity>? = null
+    private var isForegroundStarted = false
 
     private val eventListener = object : ServerEventListener {
         override fun onDeviceDiscovered(device: RegisterDto, ip: String) {
@@ -44,10 +63,9 @@ class LocalSendService : Service() {
             files: Map<String, FileDto>
         ): Boolean {
             val activity = activityRef?.get()
-            if (activity != null) {
+            if (activity != null && !activity.isFinishing) {
                 return activity.showAcceptDialog(senderInfo.alias, files)
             }
-            // No activity attached — auto-reject for safety
             broadcastStatus("Transfer rejected", "No UI available")
             return false
         }
@@ -57,7 +75,14 @@ class LocalSendService : Service() {
             fileName: String, size: Long, savedPath: String
         ) {
             broadcastStatus("File received", "$fileName (${formatSize(size)})")
-            activityRef?.get()?.addReceivedFile(fileName, size, savedPath)
+            val activity = activityRef?.get()
+            if (activity != null && !activity.isFinishing) {
+                activity.addReceivedFile(fileName, size, savedPath)
+                val ip = NetworkUtils.getLocalIpAddress(this@LocalSendService)
+                if (ip != null) {
+                    activity.updateStatus("Ready - $ip:${DeviceConfig.port}")
+                }
+            }
         }
 
         override fun onFileReceiveProgress(
@@ -65,7 +90,10 @@ class LocalSendService : Service() {
             bytesReceived: Long, totalBytes: Long
         ) {
             val percent = (bytesReceived * 100 / totalBytes).toInt()
-            activityRef?.get()?.updateStatus("Receiving: $percent%")
+            val activity = activityRef?.get()
+            if (activity != null && !activity.isFinishing) {
+                activity.updateStatus("Receiving: $percent%")
+            }
         }
 
         override fun onTransferCancelled(sessionId: String) {
@@ -79,17 +107,28 @@ class LocalSendService : Service() {
 
     override fun onBind(intent: Intent?): IBinder? = null
 
+    override fun onCreate() {
+        super.onCreate()
+        instance = this
+        pendingActivity?.get()?.let { attachActivity(it) }
+    }
+
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         when (intent?.action) {
             ACTION_START -> startAll()
-            ACTION_STOP -> stopAll()
+            ACTION_STOP -> {
+                stopAll()
+                stopSelf()
+            }
         }
         return START_NOT_STICKY
     }
 
     override fun onDestroy() {
-        super.onDestroy()
         stopAll()
+        instance = null
+        detachActivity()
+        super.onDestroy()
     }
 
     private fun startAll() {
@@ -97,18 +136,21 @@ class LocalSendService : Service() {
 
         if (httpServer != null || multicastService != null) {
             Log.i(TAG, "Stopping previous instance before restart")
-            stopAll()
+            stopServers()
         }
 
+        startForegroundNotification()
+
         val ip = NetworkUtils.getLocalIpAddress(this)
-        activityRef?.get()?.updateIpAddress(ip)
+        val activity = activityRef?.get()
+        if (activity != null && !activity.isFinishing) {
+            activity.updateIpAddress(ip)
+        }
 
         if (ip == null) {
             broadcastStatus("No WiFi", "Waiting for WiFi connection...")
             return
         }
-
-        startForegroundNotification()
 
         try {
             httpServer = LocalSendHttpServer(DeviceConfig.port, eventListener)
@@ -128,17 +170,26 @@ class LocalSendService : Service() {
             broadcastStatus("Discovery failed", e.message)
         }
 
-        activityRef?.get()?.updateStatus("Ready - $ip:${DeviceConfig.port}")
+        if (activity != null && !activity.isFinishing) {
+            activity.updateStatus("Ready - $ip:${DeviceConfig.port}")
+        }
     }
 
-    private fun stopAll() {
-        Log.i(TAG, "Stopping LocalSend service...")
+    private fun stopServers() {
         multicastService?.stop()
         multicastService = null
         httpServer?.stop()
         httpServer = null
-        @Suppress("DEPRECATION")
-        stopForeground(true)
+    }
+
+    private fun stopAll() {
+        Log.i(TAG, "Stopping LocalSend service...")
+        stopServers()
+        if (isForegroundStarted) {
+            @Suppress("DEPRECATION")
+            stopForeground(true)
+            isForegroundStarted = false
+        }
         broadcastStatus("Service stopped", null)
     }
 
@@ -169,13 +220,17 @@ class LocalSendService : Service() {
         }
 
         val intent = Intent(this, MainActivity::class.java)
-        val pendingIntent = PendingIntent.getActivity(
-            this, 0, intent, PendingIntent.FLAG_UPDATE_CURRENT
-        )
+        val flags = if (Build.VERSION.SDK_INT >= 31) {
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        } else {
+            PendingIntent.FLAG_UPDATE_CURRENT
+        }
+        val pendingIntent = PendingIntent.getActivity(this, 0, intent, flags)
 
         val builder = if (Build.VERSION.SDK_INT >= 26) {
             Notification.Builder(this, NOTIFICATION_CHANNEL_ID)
         } else {
+            @Suppress("DEPRECATION")
             Notification.Builder(this)
         }
 
@@ -187,6 +242,7 @@ class LocalSendService : Service() {
             .build()
 
         startForeground(NOTIFICATION_ID, notification)
+        isForegroundStarted = true
     }
 
     private fun broadcastStatus(status: String, details: String?) {

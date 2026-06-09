@@ -81,6 +81,16 @@ class SessionManager {
         return sessions[sessionId]?.cancelled ?: true
     }
 
+    fun markFileCompleted(sessionId: String, fileId: String) {
+        val session = sessions[sessionId] ?: return
+        session.files[fileId]?.completed = true
+    }
+
+    fun isSessionComplete(sessionId: String): Boolean {
+        val session = sessions[sessionId] ?: return true
+        return session.files.values.all { it.completed }
+    }
+
     fun getTokensForSession(sessionId: String): Map<String, String> {
         val session = sessions[sessionId] ?: return emptyMap()
         val result = HashMap<String, String>()

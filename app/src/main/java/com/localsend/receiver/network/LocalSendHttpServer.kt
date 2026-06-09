@@ -1,10 +1,10 @@
 package com.localsend.receiver.network
 
 import com.google.gson.Gson
-import com.google.gson.JsonSyntaxException
 import fi.iki.elonen.NanoHTTPD
 import com.localsend.receiver.network.dto.*
 import com.localsend.receiver.util.DeviceConfig
+import java.io.File
 
 class LocalSendHttpServer(
     port: Int,
@@ -92,10 +92,11 @@ class LocalSendHttpServer(
         val contentLength = parseContentLength(session)
 
         return try {
-            session.inputStream.use { input ->
-                fileReceiver.saveFile(input, sessionId, fileId, transfer, contentLength)
+            fileReceiver.saveFile(session.inputStream, sessionId, fileId, transfer, contentLength)
+            sessionManager.markFileCompleted(sessionId, fileId)
+            if (sessionManager.isSessionComplete(sessionId)) {
+                sessionManager.removeSession(sessionId)
             }
-            sessionManager.removeSession(sessionId)
             newFixedLengthResponse(Response.Status.OK, "application/json", "{}")
         } catch (e: FileReceiver.TransferCancelledException) {
             fileReceiver.deletePartialFile(transfer.savedPath)
@@ -120,8 +121,8 @@ class LocalSendHttpServer(
 
         val cancelled = sessionManager.cancelSession(sid)
         if (cancelled != null) {
-            for ((_, t) in cancelled.files) {
-                fileReceiver.cancelFile("$sid:${t.token}")
+            for ((fileId, t) in cancelled.files) {
+                fileReceiver.cancelFile("$sid:$fileId")
                 fileReceiver.deletePartialFile(t.savedPath)
             }
             listener.onTransferCancelled(sid)
@@ -142,12 +143,15 @@ class LocalSendHttpServer(
         val contentLength = parseContentLength(session)
         if (contentLength <= 0) return ""
 
-        val files = HashMap<String, String>()
-        session.parseBody(files)
-
-        files["postData"]?.let { return it }
-        files.values.firstOrNull()?.let { return java.io.File(it).readText(Charsets.UTF_8) }
-        return ""
+        val size = contentLength.toInt()
+        val bytes = ByteArray(size)
+        var totalRead = 0
+        while (totalRead < size) {
+            val read = session.inputStream.read(bytes, totalRead, size - totalRead)
+            if (read == -1) break
+            totalRead += read
+        }
+        return String(bytes, 0, totalRead, Charsets.UTF_8)
     }
 
     private fun parseContentLength(session: IHTTPSession): Long {
