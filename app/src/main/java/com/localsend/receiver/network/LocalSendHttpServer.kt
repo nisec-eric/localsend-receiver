@@ -5,6 +5,7 @@ import fi.iki.elonen.NanoHTTPD
 import com.localsend.receiver.network.dto.*
 import com.localsend.receiver.util.DeviceConfig
 import java.io.File
+import java.nio.charset.Charset
 
 class LocalSendHttpServer(
     port: Int,
@@ -21,6 +22,7 @@ class LocalSendHttpServer(
         private const val PATH_PREPARE_UPLOAD = "/api/localsend/v2/prepare-upload"
         private const val PATH_UPLOAD = "/api/localsend/v2/upload"
         private const val PATH_CANCEL = "/api/localsend/v2/cancel"
+        private val UTF8: Charset = Charset.forName("UTF-8")
     }
 
     override fun serve(session: IHTTPSession): Response {
@@ -151,7 +153,7 @@ class LocalSendHttpServer(
             if (read == -1) break
             totalRead += read
         }
-        return String(bytes, 0, totalRead, Charsets.UTF_8)
+        return String(bytes, 0, totalRead, UTF8)
     }
 
     private fun parseContentLength(session: IHTTPSession): Long {

@@ -12,6 +12,7 @@ import java.net.InetAddress
 import java.net.MulticastSocket
 import java.net.SocketException
 import java.net.SocketTimeoutException
+import java.nio.charset.Charset
 
 class MulticastDiscoveryService(
     private val context: Context
@@ -27,6 +28,7 @@ class MulticastDiscoveryService(
         private const val SOCKET_TIMEOUT_MS = 1000
         private const val MAX_PACKET_SIZE = 4096
         private const val LOCK_TAG = "localsend_multicast"
+        private val UTF8: Charset = Charset.forName("UTF-8")
     }
 
     private val gson = Gson()
@@ -108,7 +110,7 @@ class MulticastDiscoveryService(
 
                     if (!running) break
 
-                    val data = String(packet.data, 0, packet.length, Charsets.UTF_8)
+                    val data = String(packet.data, 0, packet.length, UTF8)
                     val senderAddress = packet.address.hostAddress ?: continue
                     handleAnnouncement(data, senderAddress)
                 }
@@ -176,7 +178,7 @@ class MulticastDiscoveryService(
     private fun sendUdpResponse(targetIp: String, targetPort: Int) {
         try {
             val response = buildResponseJson()
-            val responseBytes = response.toByteArray(Charsets.UTF_8)
+            val responseBytes = response.toByteArray(UTF8)
             val responsePacket = DatagramPacket(
                 responseBytes,
                 responseBytes.size,

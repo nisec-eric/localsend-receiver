@@ -13,6 +13,7 @@ android {
         targetSdk = 28
         versionCode = 1
         versionName = "1.0.0"
+        multiDexEnabled = true
     }
 
     signingConfigs {
@@ -41,6 +42,7 @@ android {
     }
 
     compileOptions {
+        isCoreLibraryDesugaringEnabled = true
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
     }
@@ -57,9 +59,10 @@ android {
 
 dependencies {
     implementation("org.nanohttpd:nanohttpd:2.3.1")
-    implementation("com.google.code.gson:gson:2.10.1")
+    implementation("com.google.code.gson:gson:2.8.9")
     implementation("androidx.core:core:1.5.0")
     implementation("androidx.appcompat:appcompat:1.4.2")
     implementation("androidx.annotation:annotation:1.5.0")
     implementation("org.jetbrains.kotlin:kotlin-stdlib:1.9.22")
+    coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.0.4")
 }

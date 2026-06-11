@@ -25,7 +25,7 @@ object DeviceConfig {
         var name = prefs.getString("alias", null)
         if (name == null) {
             val deviceName = android.os.Build.MODEL ?: "Device"
-            name = "Car-$deviceName"
+            name = if (deviceName.isNullOrEmpty()) "Car" else "Car-$deviceName"
             prefs.edit().putString("alias", name).apply()
         }
         return name
