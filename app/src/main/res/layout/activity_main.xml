@@ -97,10 +97,19 @@
         <TextView
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="Received Files"
+            android:text="Files"
             android:textColor="#00e5ff"
             android:textSize="18sp"
             android:textStyle="bold"
+            android:layout_marginBottom="4dp" />
+
+        <TextView
+            android:id="@+id/filePathText"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Download/LocalSend/"
+            android:textColor="#707070"
+            android:textSize="11sp"
             android:layout_marginBottom="8dp" />
 
         <ScrollView

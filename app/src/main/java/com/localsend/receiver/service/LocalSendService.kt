@@ -77,7 +77,7 @@ class LocalSendService : Service() {
             broadcastStatus("File received", "$fileName (${formatSize(size)})")
             val activity = activityRef?.get()
             if (activity != null && !activity.isFinishing) {
-                activity.addReceivedFile(fileName, size, savedPath)
+                activity.refreshFileList()
                 val ip = NetworkUtils.getLocalIpAddress(this@LocalSendService)
                 if (ip != null) {
                     activity.updateStatus("Ready - $ip:${DeviceConfig.port}")

@@ -11,8 +11,8 @@ android {
         applicationId = "com.localsend.receiver"
         minSdk = 17
         targetSdk = 28
-        versionCode = 1
-        versionName = "1.0.0"
+        versionCode = 2
+        versionName = "2.0.0"
         multiDexEnabled = true
     }
 
@@ -64,5 +64,6 @@ dependencies {
     implementation("androidx.appcompat:appcompat:1.4.2")
     implementation("androidx.annotation:annotation:1.5.0")
     implementation("org.jetbrains.kotlin:kotlin-stdlib:1.9.22")
+    implementation("androidx.multidex:multidex:2.0.1")
     coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.0.4")
 }

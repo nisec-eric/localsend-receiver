@@ -1,9 +1,9 @@
 package com.localsend.receiver
 
-import android.app.Application
+import androidx.multidex.MultiDexApplication
 import com.localsend.receiver.util.DeviceConfig
 
-class App : Application() {
+class App : MultiDexApplication() {
     override fun onCreate() {
         super.onCreate()
         DeviceConfig.init(this)
