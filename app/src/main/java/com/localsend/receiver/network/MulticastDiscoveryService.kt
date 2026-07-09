@@ -121,9 +121,9 @@ class MulticastDiscoveryService(
                 if (running) {
                     sleepBeforeRetry()
                 }
-            } catch (e: Exception) {
+            } catch (e: Throwable) {
                 if (running) {
-                    notifyError("Discovery error: ${e.message}")
+                    notifyError("Discovery error: ${e.javaClass.simpleName}: ${e.message}")
                     sleepBeforeRetry()
                 }
             } finally {
@@ -152,27 +152,30 @@ class MulticastDiscoveryService(
     }
 
     private fun handleAnnouncement(data: String, senderIp: String) {
-        val obj = try {
-            gson.fromJson(data, JsonObject::class.java)
-        } catch (_: Exception) {
-            return
-        } ?: return
+        try {
+            val obj = try {
+                gson.fromJson(data, JsonObject::class.java)
+            } catch (_: Throwable) {
+                return
+            } ?: return
 
-        if (!obj.has("announce") || !obj.get("announce").isJsonPrimitive) return
-        if (!obj.get("announce").asBoolean) return
+            if (!obj.has("announce") || !obj.get("announce").isJsonPrimitive) return
+            if (!obj.get("announce").asBoolean) return
 
-        val alias = obj.get("alias")?.asString ?: return
-        val fingerprint = obj.get("fingerprint")?.asString ?: return
-        val version = obj.get("version")?.asString ?: return
-        val port = obj.get("port")?.asInt ?: return
+            val alias = obj.get("alias")?.asString ?: return
+            val fingerprint = obj.get("fingerprint")?.asString ?: return
+            val version = obj.get("version")?.asString ?: return
+            val port = obj.get("port")?.asInt ?: return
 
-        if (fingerprint == ourFingerprint) return
+            if (fingerprint == ourFingerprint) return
 
-        listener?.onDeviceFound(alias, senderIp, port, fingerprint, version)
+            listener?.onDeviceFound(alias, senderIp, port, fingerprint, version)
 
-        HttpDiscoveryResponder.registerWithSender(senderIp, port)
+            HttpDiscoveryResponder.registerWithSender(senderIp, port)
 
-        sendUdpResponse(senderIp, port)
+            sendUdpResponse(senderIp, port)
+        } catch (_: Throwable) {
+        }
     }
 
     private fun sendUdpResponse(targetIp: String, targetPort: Int) {
@@ -187,8 +190,7 @@ class MulticastDiscoveryService(
             )
             val sock = socket ?: return
             sock.send(responsePacket)
-        } catch (_: Exception) {
-            // best-effort UDP response; HTTP is the primary channel
+        } catch (_: Throwable) {
         }
     }
 

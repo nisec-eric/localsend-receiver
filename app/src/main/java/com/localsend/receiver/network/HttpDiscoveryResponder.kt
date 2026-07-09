@@ -26,7 +26,7 @@ object HttpDiscoveryResponder {
         executor.execute {
             try {
                 doRegister(senderIp, senderPort)
-            } catch (_: Exception) { /* best-effort */ }
+            } catch (_: Throwable) { }
         }
     }
 

@@ -38,7 +38,7 @@ class LocalSendHttpServer(
                 uri.startsWith(PATH_CANCEL) && method == Method.POST -> handleCancel(session)
                 else -> errorResponse(Response.Status.NOT_FOUND, "Not found")
             }
-        } catch (e: Exception) {
+        } catch (e: Throwable) {
             errorResponse(Response.Status.INTERNAL_ERROR, e.message ?: "Error")
         }
     }
