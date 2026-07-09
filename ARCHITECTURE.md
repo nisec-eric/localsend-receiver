@@ -1,12 +1,14 @@
 # LocalSend Receiver for Android 4.2.2
 
 适用于车载 Android 4.2.2 (API 17) 横屏设备的 LocalSend v2 协议接收端。
+同时兼容 Android TV（D-pad 导航）和现代手机。
 
 - 仅 HTTP 明文模式，仅接收文件
 - 可被其他 LocalSend 设备发现（UDP Multicast + HTTP Register）
 - 传输前弹窗确认，文件保存到 `/sdcard/Download/LocalSend/`
 - 支持中文文件名
-- Release APK 约 760 KB
+- 右侧面板内置文件管理器（点击打开、长按删除）
+- Release APK 约 782 KB（单 DEX）
 
 ## 项目结构
 
@@ -197,9 +199,12 @@ MainActivity.onBackPressed()
 | Static pendingActivity 桥接 | 解决 Activity 与 Service 启动时序竞态 |
 | START_NOT_STICKY | 车机内存小，Service 被杀后不自动重启 |
 | Theme.DeviceDefault | AppCompat 主题需要 AppCompatActivity，普通 Activity 不兼容 |
-| 日志/历史列表上限 | log 50 条 / history 100 条，防 OOM |
 | 精确读 Content-Length 字节 | HTTP keep-alive 下 read()==-1 会阻塞超时 |
 | 不关闭 session.inputStream | .use{} 会关闭底层 socket 导致响应发不出去 |
+| **关闭 coreLibraryDesugaring** | desugaring 把 java.util.* 替换为 j$.util.* 放入 classes2.dex，Dalvik API 17 可能加载失败 |
+| **Gson 2.8.9 (非 2.10+)** | Gson 2.10+ 内部引用 java.util.Objects (API 19+) |
+| **catch(Throwable) 非 Exception** | NoClassDefFoundError/VerifyError 是 Error 子类，穿透 catch(Exception) |
+| **Charset.forName("UTF-8")** | Charsets.UTF_8 指向 StandardCharsets (API 19+) |
 
 ## 构建
 
@@ -212,7 +217,7 @@ MainActivity.onBackPressed()
 
 # APK 输出路径
 # app/build/outputs/apk/debug/app-debug.apk     (~2.5 MB)
-# app/build/outputs/apk/release/app-release.apk  (~760 KB)
+# app/build/outputs/apk/release/app-release.apk  (~782 KB)
 ```
 
 ### 签名密钥
@@ -247,9 +252,11 @@ MainActivity.onBackPressed()
 | 库 | 版本 | 用途 |
 |---|---|---|
 | NanoHTTPD | 2.3.1 | 嵌入式 HTTP 服务器 |
-| Gson | 2.10.1 | JSON 序列化 |
+| Gson | 2.8.9 | JSON 序列化（不用 2.10+，避免 java.util.Objects） |
 | AndroidX Core | 1.5.0 | FileProvider (API 24+ 文件打开) |
 | AndroidX AppCompat | 1.4.2 | 编译时资源兼容 |
+| AndroidX Multidex | 2.0.1 | API < 21 MultiDex 支持 |
+| Kotlin Stdlib | 1.9.22 | Kotlin 标准库 |
 
 ## 已知限制
 
@@ -324,3 +331,27 @@ Android 12 (API 31) 要求 PendingIntent 必须指定 `FLAG_IMMUTABLE` 或 `FLAG
 `Uri.fromFile()` 在 API 24+ 抛 `FileUriExposedException`。
 
 修复：API 24+ 使用 `FileProvider.getUriForFile()`。
+
+### coreLibraryDesugaring 导致 API 17 闪退（v3.0.0 根因）
+
+启用 `coreLibraryDesugaring` 后，D8 把**所有** `java.util.*` 引用替换为 `j$.util.*`，
+这些 desugar 类放在 `classes2.dex` 中。API 17 的 Dalvik VM 可能延迟或失败加载
+secondary DEX 文件。
+
+崩溃链条：
+1. App 启动正常（只用 Android framework 类，不需要 java.util 集合）
+2. 被其他设备发现 → Gson `toJson()` / `fromJson()` 第一次创建 `HashMap`
+3. 需要加载 `j$.util.HashMap`（在 classes2.dex 中）
+4. classes2.dex 未加载 → `NoClassDefFoundError`（extends Error，不是 Exception）
+5. 穿透所有 `catch(Exception)` → 线程未捕获异常 → 闪退
+
+这解释了为什么：
+- API 28+ 没问题（ART 原生加载所有 DEX）
+- 启动不崩溃（启动阶段不使用 java.util 集合）
+- 被发现时崩溃（Gson 第一次需要 HashMap）
+
+修复：**完全关闭 coreLibraryDesugaring**。源码已手动避免 API 19+：
+- `Charset.forName("UTF-8")` 替代 `StandardCharsets.UTF_8`
+- Gson 降级到 2.8.9（不引用 `java.util.Objects`）
+- 全部 `catch(Exception)` 改为 `catch(Throwable)`
+- 结果：单 DEX 文件 782KB，无 classes2.dex
