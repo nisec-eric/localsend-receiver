@@ -11,8 +11,8 @@ android {
         applicationId = "com.localsend.receiver"
         minSdk = 17
         targetSdk = 28
-        versionCode = 3
-        versionName = "3.0.0"
+        versionCode = 4
+        versionName = "3.1.0"
         multiDexEnabled = true
     }
 

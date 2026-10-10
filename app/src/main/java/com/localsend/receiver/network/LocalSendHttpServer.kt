@@ -92,9 +92,11 @@ class LocalSendHttpServer(
         }
 
         val contentLength = parseContentLength(session)
+        val chunked = session.headers?.get("transfer-encoding")
+            ?.contains("chunked", ignoreCase = true) == true
 
         return try {
-            fileReceiver.saveFile(session.inputStream, sessionId, fileId, transfer, contentLength)
+            fileReceiver.saveFile(session.inputStream, sessionId, fileId, transfer, contentLength, chunked)
             sessionManager.markFileCompleted(sessionId, fileId)
             if (sessionManager.isSessionComplete(sessionId)) {
                 sessionManager.removeSession(sessionId)
